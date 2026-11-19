@@ -1,7 +1,7 @@
 /**
 * \file    comm_log.h
 * \brief   通用日志组件 (轻量级增强版)
-* \author chenhao
+* \author Spark
 */
 #ifndef __COMM_LOG_H__
 #define __COMM_LOG_H__
