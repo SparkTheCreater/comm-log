@@ -23,6 +23,7 @@ public:
     uint64 TotalSize() const;
     const std::vector<LogFileInfo>& Files() const;
     bool Oldest(LogFileInfo& info) const;
+    bool Drop(const std::string& path);
 
     static bool ParseDateKey(const std::string& name, std::string& date_key);
 

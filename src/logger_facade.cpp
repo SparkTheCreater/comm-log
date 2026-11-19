@@ -13,6 +13,13 @@
 namespace comm_log
 {
 
+static void (*g_fatal_abort)() = abort;
+
+void SetFatalAbortHook(void (*fn)())
+{
+    g_fatal_abort = fn ? fn : abort;
+}
+
 static bool IsValidLevel(LogLevel level)
 {
     return level >= LOG_LEVEL_TRACE && level <= LOG_LEVEL_NONE;
@@ -52,42 +59,46 @@ int32 LoggerFacade::Init(const CommLogConfig& config)
     std::lock_guard<std::mutex> guard(m_state_mutex);
     if (m_running.load())
     {
-        return RET_OK;
+        return RET_ERROR;
     }
-
-    m_config = config;
-    if (!m_config.log_dir || m_config.log_dir[0] == 0)
+    if (!config.log_dir || config.log_dir[0] == 0)
     {
         return RET_ERROR;
     }
-    LogLevel base_level = LOG_LEVEL_INFO;
-    if (IsValidLevel(m_config.level))
+    if (!IsValidLevel(config.level) ||
+        !IsValidLevel(config.console_level) ||
+        !IsValidLevel(config.file_level) ||
+        config.queue_capacity == 0)
     {
-        base_level = m_config.level;
+        return RET_ERROR;
     }
-    m_level.store(base_level);
 
-    LogLevel console_level = base_level;
-    if (IsValidLevel(m_config.console_level))
-    {
-        console_level = m_config.console_level;
-    }
-    m_console_level.store(console_level);
+    CommLogConfig saved_config = m_config;
+    std::string saved_dir = m_log_dir;
+    LogLevel saved_level = m_level.load();
+    LogLevel saved_console = m_console_level.load();
+    LogLevel saved_file = m_file_level.load();
+    uint64 saved_max_bytes = 0;
+    uint32 saved_keep_days = 0;
 
-    LogLevel file_level = base_level;
-    if (IsValidLevel(m_config.file_level))
-    {
-        file_level = m_config.file_level;
-    }
-    m_file_level.store(file_level);
+    m_config = config;
+    m_level.store(config.level);
+    m_console_level.store(config.console_level);
+    m_file_level.store(config.file_level);
+    m_log_dir = config.log_dir;
 
-    m_log_dir = m_config.log_dir;
     if (!FsUtil::EnsureDir(m_log_dir, 0777))
     {
-        m_file_level.store(LOG_LEVEL_NONE);
-        m_running.store(true);
+        m_config = saved_config;
+        m_log_dir = saved_dir;
+        m_level.store(saved_level);
+        m_console_level.store(saved_console);
+        m_file_level.store(saved_file);
+        m_running.store(false);
+        return RET_ERROR;
     }
-    m_retention.Configure(m_config.max_total_bytes, m_config.keep_days);
+
+    m_retention.Configure(config.max_total_bytes, config.keep_days);
 
     uint64 now = TimeUtil::NowMs();
     TimeInfo t = TimeUtil::ToLocalTime(now);
@@ -95,17 +106,42 @@ int32 LoggerFacade::Init(const CommLogConfig& config)
     m_retention.SetCurrentDateKey(date_key);
     m_last_flush_ms = now;
 
-    m_dispatcher.Start(m_config.queue_capacity);
+    m_dispatcher.Start(config.queue_capacity);
     m_running.store(true);
 
     m_thread = Thread::Create(LoggerThread, this, 0, false, 0, 0);
     if (m_thread == COMM_INVALID_THREAD)
     {
         m_running.store(false);
+        m_dispatcher.Stop();
+        m_config = saved_config;
+        m_log_dir = saved_dir;
+        m_level.store(saved_level);
+        m_console_level.store(saved_console);
+        m_file_level.store(saved_file);
+        m_retention.Configure(saved_max_bytes, saved_keep_days);
         return RET_ERROR;
     }
 
-    TryCleanup(date_key);
+    if (!TryCleanup(date_key))
+    {
+        m_running.store(false);
+        m_dispatcher.Stop();
+        m_dispatcher.NotifyAll();
+        if (m_thread != COMM_INVALID_THREAD)
+        {
+            Thread::Wait(m_thread);
+            m_thread = COMM_INVALID_THREAD;
+        }
+        m_sink.Close();
+        m_config = saved_config;
+        m_log_dir = saved_dir;
+        m_level.store(saved_level);
+        m_console_level.store(saved_console);
+        m_file_level.store(saved_file);
+        m_retention.Configure(saved_max_bytes, saved_keep_days);
+        return RET_ERROR;
+    }
     return RET_OK;
 }
 
@@ -217,7 +253,11 @@ void LoggerFacade::FatalAndAbort(const char* file,
                                  va_list args)
 {
     char buffer[1024];
-    vsnprintf(buffer, sizeof(buffer), format, args);
+    buffer[0] = '\0';
+    if (format)
+    {
+        vsnprintf(buffer, sizeof(buffer), format, args);
+    }
 
     LogRecord record;
     record.level = LOG_LEVEL_FATAL;
@@ -233,6 +273,7 @@ void LoggerFacade::FatalAndAbort(const char* file,
         WriteConsole(record);
     }
 
+    if (m_running.load() && !m_log_dir.empty())
     {
         std::lock_guard<std::mutex> guard(m_sink_mutex);
         if (EnsureOpenForDate(record.date_key))
@@ -242,7 +283,7 @@ void LoggerFacade::FatalAndAbort(const char* file,
             m_sink.FlushSync();
         }
     }
-    abort();
+    g_fatal_abort();
 }
 
 void LoggerFacade::Flush()
@@ -312,10 +353,10 @@ bool LoggerFacade::EnsureOpenForDate(const std::string& date_key)
     return true;
 }
 
-void LoggerFacade::TryCleanup(const std::string& date_key)
+bool LoggerFacade::TryCleanup(const std::string& date_key)
 {
     m_retention.SetCurrentDateKey(date_key);
-    m_retention.Cleanup(m_log_dir);
+    return m_retention.Cleanup(m_log_dir);
 }
 
 void LoggerFacade::EnqueueRecord(const LogRecord& record)

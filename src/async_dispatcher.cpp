@@ -21,7 +21,7 @@ bool AsyncDispatcher::Start(uint32 capacity)
     {
         return true;
     }
-    m_capacity = (capacity == 0) ? 1024 : capacity;
+    m_capacity = capacity;
     m_running = true;
     return true;
 }
@@ -45,10 +45,6 @@ void AsyncDispatcher::Push(const LogRecord& record)
     while (m_running && m_queue.size() >= m_capacity)
     {
         m_cv_not_full.wait(lock);
-    }
-    if (!m_running)
-    {
-        return;
     }
     m_queue.push_back(record);
     m_cv_not_empty.notify_one();

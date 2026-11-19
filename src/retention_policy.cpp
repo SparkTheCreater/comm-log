@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <vector>
 
 namespace comm_log
 {
@@ -32,51 +33,64 @@ bool RetentionPolicy::Cleanup(const std::string& dir)
     {
         return false;
     }
-
-    bool changed = false;
-    while (CleanupBySize(catalog))
-    {
-        changed = true;
-        if (!catalog.Scan(dir))
-        {
-            return changed;
-        }
-    }
-    while (CleanupByDays(catalog))
-    {
-        changed = true;
-        if (!catalog.Scan(dir))
-        {
-            return changed;
-        }
-    }
-    return changed;
-}
-
-bool RetentionPolicy::CleanupBySize(FileCatalog& catalog)
-{
-    if (m_max_total_bytes == 0)
+    if (!CleanupBySize(catalog))
     {
         return false;
     }
-    if (catalog.TotalSize() <= m_max_total_bytes)
+    return CleanupByDays(catalog);
+}
+
+static bool IsSkipped(const std::vector<std::string>& skipped, const std::string& path)
+{
+    for (size_t i = 0; i < skipped.size(); ++i)
+    {
+        if (skipped[i] == path)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool IsLeapYear(int year)
+{
+    return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+}
+
+static bool IsCalendarDate(int year, int month, int day)
+{
+    static const int kDays[] = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    if (month < 1 || month > 12 || day < 1)
     {
         return false;
     }
-    return RemoveOldest(catalog);
+    int days = kDays[month];
+    if (month == 2 && IsLeapYear(year))
+    {
+        days = 29;
+    }
+    return day <= days;
 }
 
-static int32 DaysDiff(const std::string& oldest, const std::string& current)
+static bool DaysDiff(const std::string& oldest, const std::string& current, int32* days)
 {
-    int y1, m1, d1;
-    int y2, m2, d2;
+    int y1 = 0;
+    int m1 = 0;
+    int d1 = 0;
+    int y2 = 0;
+    int m2 = 0;
+    int d2 = 0;
     if (sscanf(oldest.c_str(), "%4d-%2d-%2d", &y1, &m1, &d1) != 3)
     {
-        return 0;
+        return false;
     }
     if (sscanf(current.c_str(), "%4d-%2d-%2d", &y2, &m2, &d2) != 3)
     {
-        return 0;
+        return false;
+    }
+    if (!IsCalendarDate(y1, m1, d1) || !IsCalendarDate(y2, m2, d2))
+    {
+        return false;
     }
     struct tm t1;
     struct tm t2;
@@ -88,47 +102,107 @@ static int32 DaysDiff(const std::string& oldest, const std::string& current)
     t2.tm_year = y2 - 1900;
     t2.tm_mon = m2 - 1;
     t2.tm_mday = d2;
+    t1.tm_isdst = -1;
+    t2.tm_isdst = -1;
     time_t s1 = mktime(&t1);
     time_t s2 = mktime(&t2);
     if (s1 == (time_t)-1 || s2 == (time_t)-1)
     {
-        return 0;
+        return false;
     }
-    double diff = difftime(s2, s1);
-    return (int32)(diff / 86400);
+    *days = (int32)(difftime(s2, s1) / 86400);
+    return true;
+}
+
+bool RetentionPolicy::CleanupBySize(FileCatalog& catalog)
+{
+    if (m_max_total_bytes == 0)
+    {
+        return true;
+    }
+
+    std::vector<std::string> skipped;
+    while (catalog.TotalSize() > m_max_total_bytes)
+    {
+        bool found = false;
+        LogFileInfo target;
+        const std::vector<LogFileInfo>& files = catalog.Files();
+        for (size_t i = 0; i < files.size(); ++i)
+        {
+            if (files[i].date_key == m_current_date_key)
+            {
+                continue;
+            }
+            if (IsSkipped(skipped, files[i].path))
+            {
+                continue;
+            }
+            target = files[i];
+            found = true;
+            break;
+        }
+        if (!found)
+        {
+            return false;
+        }
+        if (!FsUtil::RemoveFile(target.path))
+        {
+            skipped.push_back(target.path);
+            continue;
+        }
+        catalog.Drop(target.path);
+    }
+    return true;
 }
 
 bool RetentionPolicy::CleanupByDays(FileCatalog& catalog)
 {
-    if (m_keep_days == 0)
+    if (m_keep_days == 0 || m_current_date_key.empty())
     {
-        return false;
-    }
-    if (m_current_date_key.empty())
-    {
-        return false;
+        return true;
     }
 
-    LogFileInfo oldest;
-    if (!catalog.Oldest(oldest))
+    std::vector<std::string> skipped;
+    for (;;)
     {
-        return false;
+        bool found = false;
+        LogFileInfo target;
+        const std::vector<LogFileInfo>& files = catalog.Files();
+        for (size_t i = 0; i < files.size(); ++i)
+        {
+            if (IsSkipped(skipped, files[i].path))
+            {
+                continue;
+            }
+            if (files[i].date_key == m_current_date_key)
+            {
+                return true;
+            }
+            int32 diff = 0;
+            if (!DaysDiff(files[i].date_key, m_current_date_key, &diff))
+            {
+                skipped.push_back(files[i].path);
+                continue;
+            }
+            if (diff < 0 || (uint32)diff < m_keep_days)
+            {
+                return true;
+            }
+            target = files[i];
+            found = true;
+            break;
+        }
+        if (!found)
+        {
+            return true;
+        }
+        if (!FsUtil::RemoveFile(target.path))
+        {
+            skipped.push_back(target.path);
+            continue;
+        }
+        catalog.Drop(target.path);
     }
-    if (oldest.date_key == m_current_date_key)
-    {
-        return false;
-    }
-
-    int32 diff = DaysDiff(oldest.date_key, m_current_date_key);
-    if (diff < 0)
-    {
-        return false;
-    }
-    if ((uint32)diff < m_keep_days)
-    {
-        return false;
-    }
-    return RemoveOldest(catalog);
 }
 
 bool RetentionPolicy::RemoveOldest(FileCatalog& catalog)
@@ -142,7 +216,12 @@ bool RetentionPolicy::RemoveOldest(FileCatalog& catalog)
     {
         return false;
     }
-    return FsUtil::RemoveFile(oldest.path);
+    if (!FsUtil::RemoveFile(oldest.path))
+    {
+        return false;
+    }
+    catalog.Drop(oldest.path);
+    return true;
 }
 
 }

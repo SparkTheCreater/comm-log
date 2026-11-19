@@ -32,13 +32,18 @@ make CXX=aarch64-linux-gnu-g++ AR=aarch64-linux-gnu-ar
 初始化：
 
 ```c
+#include <string.h>
+
 CommLogConfig cfg;
+memset(&cfg, 0, sizeof(cfg));
 cfg.log_dir = "/home/log";
 cfg.max_total_bytes = 100ULL * 1024ULL * 1024ULL;
 cfg.keep_days = 30;
 cfg.queue_capacity = 4096;
 cfg.flush_interval_ms = 1000;
 cfg.level = LOG_LEVEL_INFO;
+cfg.console_level = LOG_LEVEL_INFO;
+cfg.file_level = LOG_LEVEL_INFO;
 comm_log_init(&cfg);
 ```
 
