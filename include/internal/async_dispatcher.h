@@ -20,7 +20,7 @@ public:
     bool Start(uint32 capacity);
     void Stop();
 
-    void Push(const LogRecord& record);
+    bool Push(const LogRecord& record);
     bool Pop(LogRecord& record);
 
     void NotifyAll();

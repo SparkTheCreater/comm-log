@@ -312,16 +312,54 @@ struct PushArg
 {
     comm_log::AsyncDispatcher* dispatcher;
     comm_log::LogRecord record;
+    bool pushed;
 };
 
 static void* PushWaiter(void* arg)
 {
     PushArg* push = (PushArg*)arg;
-    push->dispatcher->Push(push->record);
+    push->pushed = push->dispatcher->Push(push->record);
     return NULL;
 }
 
-static void TestStopKeepsWaitingRecord()
+static void* ProduceUntilStopped(void* arg)
+{
+    unsigned int* count = (unsigned int*)arg;
+    for (unsigned int i = 0; i < 100000; ++i)
+    {
+        LOG_INFO("shutdown-message-%u", i);
+        ++*count;
+    }
+    return NULL;
+}
+
+static void TestConcurrentShutdown()
+{
+    for (int round = 0; round < 20; ++round)
+    {
+        std::string dir = MakeDir("concurrent-shutdown");
+        CommLogConfig cfg;
+        FillBase(&cfg, dir);
+        cfg.queue_capacity = 2;
+        cfg.console_level = LOG_LEVEL_NONE;
+        CHECK(comm_log_init(&cfg) == 0);
+        unsigned int counts[4] = {0};
+        pthread_t writers[4];
+        for (int i = 0; i < 4; ++i)
+        {
+            CHECK(pthread_create(&writers[i], NULL, ProduceUntilStopped, &counts[i]) == 0);
+        }
+        comm_log_fini();
+        for (int i = 0; i < 4; ++i)
+        {
+            pthread_join(writers[i], NULL);
+        }
+        CHECK(comm_log_init(&cfg) == 0);
+        comm_log_fini();
+    }
+}
+
+static void TestStopRejectsWaitingRecord()
 {
     comm_log::AsyncDispatcher dispatcher;
     CHECK(dispatcher.Start(1));
@@ -340,12 +378,11 @@ static void TestStopKeepsWaitingRecord()
     usleep(100 * 1000);
     dispatcher.Stop();
     pthread_join(thread, NULL);
+    CHECK(!arg.pushed);
 
     comm_log::LogRecord out;
     CHECK(dispatcher.Pop(out));
     CHECK(out.message == "first");
-    CHECK(dispatcher.Pop(out));
-    CHECK(out.message == "second");
     CHECK(!dispatcher.Pop(out));
 }
 
@@ -362,7 +399,8 @@ int main()
     TestLongMessages();
     TestRetryFileOpen();
     TestInitPaths();
-    TestStopKeepsWaitingRecord();
+    TestConcurrentShutdown();
+    TestStopRejectsWaitingRecord();
     if (g_failed)
     {
         fprintf(stderr, "comm_log_fix_test failed=%d\n", g_failed);

@@ -141,6 +141,7 @@ int32 LoggerFacade::Init(const CommLogConfig& config)
     {
         m_running.store(false);
         m_dispatcher.Stop();
+        m_dispatcher.NotifyAll();
         m_config = saved_config;
         m_log_dir = saved_dir;
         m_level.store(saved_level);
@@ -174,15 +175,12 @@ int32 LoggerFacade::Init(const CommLogConfig& config)
 
 void LoggerFacade::Fini()
 {
+    std::lock_guard<std::mutex> guard(m_state_mutex);
+    if (!m_running.load())
     {
-        std::lock_guard<std::mutex> guard(m_state_mutex);
-        if (!m_running.load())
-        {
-            return;
-        }
-        m_running.store(false);
+        return;
     }
-
+    m_running.store(false);
     m_dispatcher.Stop();
     m_dispatcher.NotifyAll();
 

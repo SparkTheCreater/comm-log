@@ -39,15 +39,20 @@ void AsyncDispatcher::Stop()
     NotifyAll();
 }
 
-void AsyncDispatcher::Push(const LogRecord& record)
+bool AsyncDispatcher::Push(const LogRecord& record)
 {
     std::unique_lock<std::mutex> lock(m_mutex);
     while (m_running && m_queue.size() >= m_capacity)
     {
         m_cv_not_full.wait(lock);
     }
+    if (!m_running)
+    {
+        return false;
+    }
     m_queue.push_back(record);
     m_cv_not_empty.notify_one();
+    return true;
 }
 
 bool AsyncDispatcher::Pop(LogRecord& record)
