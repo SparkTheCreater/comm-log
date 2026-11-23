@@ -10,7 +10,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <vector>
-#include <vector>
 
 namespace comm_log
 {
@@ -190,8 +189,9 @@ void LoggerFacade::Fini()
         m_thread = COMM_INVALID_THREAD;
     }
 
-    m_sink.Flush();
+    m_sink.FlushSync();
     m_sink.Close();
+    m_dispatcher.Complete(m_dispatcher.LastSequence());
 }
 
 void LoggerFacade::SetLevel(LogLevel level)
@@ -315,54 +315,46 @@ void LoggerFacade::FatalAndAbort(const char* file,
 
 void LoggerFacade::Flush()
 {
+    uint64 target = m_dispatcher.LastSequence();
+    if (!m_running.load() && target == 0)
+    {
+        return;
+    }
+    m_dispatcher.Wait(target);
     std::lock_guard<std::mutex> guard(m_sink_mutex);
-    m_sink.Flush();
+    m_sink.FlushSync();
 }
 
 void LoggerFacade::Run()
 {
-    while (m_running.load())
+    for (;;)
     {
         LogRecord record;
         if (!m_dispatcher.Pop(record))
         {
+            if (!m_running.load())
+            {
+                break;
+            }
             continue;
         }
 
         {
             std::lock_guard<std::mutex> guard(m_sink_mutex);
-            if (!EnsureOpenForDate(record.date_key))
+            if (EnsureOpenForDate(record.date_key))
             {
-                continue;
-            }
-            std::string line = m_formatter.Format(record);
-            m_sink.WriteLine(line);
-            /*
-             * 队列写空就落盘：日志稀疏时每条都及时进文件，不用等下一条日志来带，
-             * 进程崩溃也不会丢掉最后几条。一直有日志进来时按 flush_interval_ms 攒一批再落。
-             */
-            uint64 now = TimeUtil::NowMs();
-            if (m_dispatcher.Size() == 0 ||
-                (m_config.flush_interval_ms > 0 && now - m_last_flush_ms >= m_config.flush_interval_ms))
-            {
-                m_sink.Flush();
-                m_last_flush_ms = now;
+                std::string line = m_formatter.Format(record);
+                m_sink.WriteLine(line);
+                uint64 now = TimeUtil::NowMs();
+                if (m_dispatcher.Size() == 0 ||
+                    (m_config.flush_interval_ms > 0 && now - m_last_flush_ms >= m_config.flush_interval_ms))
+                {
+                    m_sink.Flush();
+                    m_last_flush_ms = now;
+                }
             }
         }
-    }
-
-    LogRecord record;
-    while (m_dispatcher.Pop(record))
-    {
-        {
-            std::lock_guard<std::mutex> guard(m_sink_mutex);
-            if (!EnsureOpenForDate(record.date_key))
-            {
-                continue;
-            }
-            std::string line = m_formatter.Format(record);
-            m_sink.WriteLine(line);
-        }
+        m_dispatcher.Complete(record.sequence);
     }
 }
 
@@ -386,9 +378,9 @@ bool LoggerFacade::TryCleanup(const std::string& date_key)
     return m_retention.Cleanup(m_log_dir);
 }
 
-void LoggerFacade::EnqueueRecord(const LogRecord& record)
+void LoggerFacade::EnqueueRecord(LogRecord& record)
 {
-    m_dispatcher.Push(record);
+    m_dispatcher.Push(record, record.sequence);
 }
 
 void LoggerFacade::WriteConsole(const LogRecord& record)

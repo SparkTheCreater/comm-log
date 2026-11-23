@@ -12,6 +12,7 @@ namespace comm_log
 struct LogRecord
 {
     LogLevel level;
+    uint64 sequence;
     uint64 timestamp_ms;
     int line;
     std::string file;

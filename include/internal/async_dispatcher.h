@@ -20,8 +20,11 @@ public:
     bool Start(uint32 capacity);
     void Stop();
 
-    bool Push(const LogRecord& record);
+    bool Push(const LogRecord& record, uint64& sequence);
     bool Pop(LogRecord& record);
+    uint64 LastSequence() const;
+    void Complete(uint64 sequence);
+    void Wait(uint64 sequence);
 
     void NotifyAll();
     uint32 Size() const;
@@ -29,10 +32,13 @@ public:
 private:
     uint32 m_capacity;
     bool m_running;
+    uint64 m_next_sequence;
+    uint64 m_completed_sequence;
     std::deque<LogRecord> m_queue;
     mutable std::mutex m_mutex;
     std::condition_variable m_cv_not_empty;
     std::condition_variable m_cv_not_full;
+    std::condition_variable m_cv_barrier;
 };
 
 }

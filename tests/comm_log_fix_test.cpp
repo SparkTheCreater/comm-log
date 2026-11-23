@@ -145,11 +145,43 @@ static void TestTodayOversize()
     CHECK(Exists(dir + "/" + TodayKey() + ".log"));
 }
 
+static void TestFlushBarrier()
+{
+    std::string dir = MakeDir("flush-barrier");
+    CommLogConfig cfg;
+    FillBase(&cfg, dir);
+    cfg.console_level = LOG_LEVEL_NONE;
+    cfg.flush_interval_ms = 60000;
+    CHECK(comm_log_init(&cfg) == 0);
+    for (int i = 0; i < 100; ++i)
+    {
+        LOG_INFO("barrier-before-%d", i);
+    }
+    comm_log_flush();
+
+    FILE* fp = fopen((dir + "/" + TodayKey() + ".log").c_str(), "r");
+    CHECK(fp != NULL);
+    if (fp)
+    {
+        std::string data;
+        char buffer[4096];
+        size_t size = 0;
+        while ((size = fread(buffer, 1, sizeof(buffer), fp)) > 0)
+        {
+            data.append(buffer, size);
+        }
+        CHECK(data.find("barrier-before-99") != std::string::npos);
+        fclose(fp);
+    }
+    comm_log_fini();
+}
+
 static void TestLongMessages()
 {
     std::string dir = MakeDir("long-message");
     CommLogConfig cfg;
     FillBase(&cfg, dir);
+    cfg.console_level = LOG_LEVEL_NONE;
     CHECK(comm_log_init(&cfg) == 0);
     std::string message(8192, 'x');
     message += "-中文结尾";
@@ -313,12 +345,13 @@ struct PushArg
     comm_log::AsyncDispatcher* dispatcher;
     comm_log::LogRecord record;
     bool pushed;
+    uint64 sequence;
 };
 
 static void* PushWaiter(void* arg)
 {
     PushArg* push = (PushArg*)arg;
-    push->pushed = push->dispatcher->Push(push->record);
+    push->pushed = push->dispatcher->Push(push->record, push->sequence);
     return NULL;
 }
 
@@ -366,7 +399,8 @@ static void TestStopRejectsWaitingRecord()
 
     comm_log::LogRecord first;
     first.message = "first";
-    dispatcher.Push(first);
+    uint64 sequence = 0;
+    dispatcher.Push(first, sequence);
 
     comm_log::LogRecord second;
     second.message = "second";
@@ -397,6 +431,7 @@ int main()
     TestGlobalLevelFilter();
     TestNullFormat();
     TestLongMessages();
+    TestFlushBarrier();
     TestRetryFileOpen();
     TestInitPaths();
     TestConcurrentShutdown();

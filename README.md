@@ -25,7 +25,7 @@ make CXX=aarch64-linux-gnu-g++ AR=aarch64-linux-gnu-ar
 - FATAL：同步落盘后 `abort`
 - 对外接口：`include/comm_log_api.h`，宏在 `include/comm_log.h`
 
-控制台输出在调用线程同步打印。文件输出进入队列，由后台线程写入。队列写空时立即落盘；持续有日志时按 `flush_interval_ms` 攒一批再落盘。清理在初始化、跨天和定期触发时执行。
+控制台输出在调用线程同步打印。文件输出进入队列，由后台线程写入。队列写空时立即刷新 stdio 缓冲区；持续有日志时按 `flush_interval_ms` 攒一批再刷新。`comm_log_flush()` 等待此前已接受的文件日志处理完成，并执行 `fflush` 和 `fsync`；普通日志仍是异步写入，未 flush 的记录可能在进程崩溃时丢失。清理在初始化、跨天和定期触发时执行。
 
 ## 示例
 

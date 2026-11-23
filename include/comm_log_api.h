@@ -109,7 +109,7 @@ LogLevel comm_log_get_file_level(void);
 
 /**
 函数名称 : comm_log_flush
-函数功能 : 主动落盘
+函数功能 : 等待此前已接受的文件日志写完，并同步到持久化存储
 输入参数说明 : 无
 函数返回值的说明 : 无
 */

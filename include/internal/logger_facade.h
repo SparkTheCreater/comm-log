@@ -55,7 +55,7 @@ private:
     void Run();
     bool EnsureOpenForDate(const std::string& date_key);
     bool TryCleanup(const std::string& date_key);
-    void EnqueueRecord(const LogRecord& record);
+    void EnqueueRecord(LogRecord& record);
     void WriteConsole(const LogRecord& record);
     friend void* CALLBACK LoggerThread(void* arg);
 
