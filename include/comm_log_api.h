@@ -116,6 +116,12 @@ LogLevel comm_log_get_file_level(void);
 void comm_log_flush(void);
 
 /**
+函数功能 : 获取最近一次文件 I/O 错误码，0 表示未记录错误
+函数返回值的说明 : errno 错误码
+*/
+int32 comm_log_get_last_io_error(void);
+
+/**
 函数名称 : comm_log_write
 函数功能 : 写日志（格式化输出）
 输入参数说明 : level 等级; file 文件; func 函数; line 行号; format 格式字符串

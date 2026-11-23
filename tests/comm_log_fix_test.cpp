@@ -146,6 +146,30 @@ static void TestTodayOversize()
     CHECK(Exists(dir + "/" + TodayKey() + ".log"));
 }
 
+static void TestIoErrors()
+{
+    comm_log::FileSink sink;
+    if (access("/dev/full", W_OK) == 0)
+    {
+        CHECK(sink.OpenPath("/dev/full"));
+        CHECK(sink.WriteLine("trigger-no-space"));
+        CHECK(!sink.FlushSync());
+        CHECK(errno == ENOSPC);
+        sink.Close();
+    }
+
+    std::string dir = MakeDir("io-error");
+    CommLogConfig cfg;
+    FillBase(&cfg, dir);
+    CHECK(comm_log_init(&cfg) == 0);
+    std::string blocked = dir + "/blocked";
+    CHECK(mkdir(blocked.c_str(), 0755) == 0);
+    LOG_INFO("%s", "cannot-open-file");
+    comm_log_flush();
+    CHECK(comm_log_get_last_io_error() != 0);
+    comm_log_fini();
+}
+
 static void TestFatalDrainsPriorLogs()
 {
     std::string dir = MakeDir("fatal-drain");
@@ -473,6 +497,7 @@ int main()
     TestLongMessages();
     TestFlushBarrier();
     TestFatalDrainsPriorLogs();
+    TestIoErrors();
     TestRetryFileOpen();
     TestInitPaths();
     TestConcurrentShutdown();

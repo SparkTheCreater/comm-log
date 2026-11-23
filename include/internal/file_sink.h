@@ -16,10 +16,12 @@ public:
     ~FileSink();
 
     bool Open(const std::string& dir, const std::string& date_key);
-    void Close();
+    bool OpenPath(const std::string& path);
+    bool OpenPath(const std::string& path, const std::string& date_key);
+    bool Close();
     bool WriteLine(const std::string& line);
-    void Flush();
-    void FlushSync();
+    bool Flush();
+    bool FlushSync();
     bool IsOpen() const;
 
     const std::string& CurrentDateKey() const;

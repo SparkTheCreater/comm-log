@@ -1,10 +1,20 @@
 #include "internal/file_sink.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <unistd.h>
 
 namespace comm_log
 {
+
+static bool RequireErrno(bool success)
+{
+    if (!success && errno == 0)
+    {
+        errno = EIO;
+    }
+    return success;
+}
 
 FileSink::FileSink()
     : m_fp(NULL)
@@ -18,32 +28,44 @@ FileSink::~FileSink()
 
 bool FileSink::Open(const std::string& dir, const std::string& date_key)
 {
-    Close();
+    return OpenPath(dir + "/" + date_key + ".log", date_key);
+}
 
-    std::string path = dir + "/" + date_key + ".log";
+bool FileSink::OpenPath(const std::string& path)
+{
+    return OpenPath(path, "");
+}
+
+bool FileSink::OpenPath(const std::string& path, const std::string& date_key)
+{
     FILE* fp = fopen(path.c_str(), "a");
     if (!fp)
     {
         return false;
     }
-    m_dir = dir;
-    m_date_key = date_key;
+    if (!Close())
+    {
+        fclose(fp);
+        return false;
+    }
     m_path = path;
+    m_date_key = date_key;
     m_fp = fp;
     return true;
 }
 
-void FileSink::Close()
+bool FileSink::Close()
 {
+    int result = 0;
     if (m_fp)
     {
-        fclose(m_fp);
+        result = fclose(m_fp);
         m_fp = NULL;
     }
-    // 路径仅描述已成功打开的文件，不能作为文件描述符仍有效的依据。
     m_dir.clear();
     m_date_key.clear();
     m_path.clear();
+    return RequireErrno(result == 0);
 }
 
 bool FileSink::WriteLine(const std::string& line)
@@ -54,29 +76,34 @@ bool FileSink::WriteLine(const std::string& line)
     }
     size_t n = fwrite(line.c_str(), 1, line.size(), m_fp);
     size_t m = fwrite("\n", 1, 1, m_fp);
-    return (n == line.size() && m == 1);
+    if (n == line.size() && m == 1)
+    {
+        return true;
+    }
+    if (errno == 0)
+    {
+        errno = EIO;
+    }
+    return false;
 }
 
-void FileSink::Flush()
+bool FileSink::Flush()
 {
-    if (m_fp)
-    {
-        fflush(m_fp);
-    }
+    return RequireErrno(!m_fp || fflush(m_fp) == 0);
 }
 
-void FileSink::FlushSync()
+bool FileSink::FlushSync()
 {
-    if (!m_fp)
+    if (!m_fp || !Flush())
     {
-        return;
+        return false;
     }
-    fflush(m_fp);
     int fd = fileno(m_fp);
-    if (fd >= 0)
+    if (fd < 0)
     {
-        fsync(fd);
+        return false;
     }
+    return RequireErrno(fsync(fd) == 0);
 }
 
 bool FileSink::IsOpen() const

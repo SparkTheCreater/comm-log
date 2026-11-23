@@ -4,6 +4,7 @@
 
 #include "comm_thread.h"
 
+#include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -71,6 +72,8 @@ LoggerFacade::LoggerFacade()
     , m_file_level(LOG_LEVEL_INFO)
     , m_thread(COMM_INVALID_THREAD)
     , m_last_flush_ms(0)
+    , m_last_io_error(0)
+    , m_last_error_report_ms(0)
 {
     memset(&m_config, 0, sizeof(m_config));
 }
@@ -189,8 +192,14 @@ void LoggerFacade::Fini()
         m_thread = COMM_INVALID_THREAD;
     }
 
-    m_sink.FlushSync();
-    m_sink.Close();
+    if (!m_sink.FlushSync())
+    {
+        ReportIoError(errno);
+    }
+    if (!m_sink.Close())
+    {
+        ReportIoError(errno);
+    }
     m_dispatcher.Complete(m_dispatcher.LastSequence());
 }
 
@@ -309,6 +318,11 @@ void LoggerFacade::FatalAndAbort(const char* file,
     g_fatal_abort();
 }
 
+int32 LoggerFacade::LastIoError() const
+{
+    return m_last_io_error.load();
+}
+
 void LoggerFacade::Flush()
 {
     uint64 target = m_dispatcher.LastSequence();
@@ -318,7 +332,10 @@ void LoggerFacade::Flush()
     }
     m_dispatcher.Wait(target);
     std::lock_guard<std::mutex> guard(m_sink_mutex);
-    m_sink.FlushSync();
+    if (!m_sink.FlushSync())
+    {
+        ReportIoError(errno);
+    }
 }
 
 void LoggerFacade::Run()
@@ -337,15 +354,24 @@ void LoggerFacade::Run()
 
         {
             std::lock_guard<std::mutex> guard(m_sink_mutex);
-            if (EnsureOpenForDate(record.date_key))
+            if (!EnsureOpenForDate(record.date_key))
             {
-                std::string line = m_formatter.Format(record);
-                m_sink.WriteLine(line);
+                ReportIoError(errno);
+            }
+            else if (!m_sink.WriteLine(m_formatter.Format(record)))
+            {
+                ReportIoError(errno);
+            }
+            if (m_sink.IsOpen())
+            {
                 uint64 now = TimeUtil::NowMs();
                 if (m_dispatcher.Size() == 0 ||
                     (m_config.flush_interval_ms > 0 && now - m_last_flush_ms >= m_config.flush_interval_ms))
                 {
-                    m_sink.Flush();
+                    if (!m_sink.Flush())
+                    {
+                        ReportIoError(errno);
+                    }
                     m_last_flush_ms = now;
                 }
             }
@@ -377,6 +403,24 @@ bool LoggerFacade::TryCleanup(const std::string& date_key)
 void LoggerFacade::EnqueueRecord(LogRecord& record)
 {
     m_dispatcher.Push(record, record.sequence);
+}
+
+void LoggerFacade::ReportIoError(int error)
+{
+    if (error == 0)
+    {
+        error = EIO;
+    }
+    m_last_io_error.store(error);
+    uint64 now = TimeUtil::NowMs();
+    uint64 previous = m_last_error_report_ms.load();
+    if (previous != 0 && now - previous < 1000)
+    {
+        return;
+    }
+    m_last_error_report_ms.store(now);
+    fprintf(stderr, "comm-log: file I/O error: %s (errno=%d)\n", strerror(error), error);
+    fflush(stderr);
 }
 
 void LoggerFacade::WriteConsole(const LogRecord& record)

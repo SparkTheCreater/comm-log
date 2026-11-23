@@ -40,6 +40,7 @@ public:
                va_list args);
 
     void Flush();
+    int32 LastIoError() const;
     void FatalAndAbort(const char* file,
                        const char* func,
                        int line,
@@ -56,6 +57,7 @@ private:
     bool EnsureOpenForDate(const std::string& date_key);
     bool TryCleanup(const std::string& date_key);
     void EnqueueRecord(LogRecord& record);
+    void ReportIoError(int error);
     void WriteConsole(const LogRecord& record);
     friend void* CALLBACK LoggerThread(void* arg);
 
@@ -75,6 +77,8 @@ private:
     std::mutex m_sink_mutex;
     std::mutex m_console_mutex;
     uint64 m_last_flush_ms;
+    std::atomic<int32> m_last_io_error;
+    std::atomic<uint64> m_last_error_report_ms;
 };
 
 }

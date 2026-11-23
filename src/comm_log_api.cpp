@@ -54,6 +54,11 @@ void comm_log_flush(void)
     LoggerFacade::Instance().Flush();
 }
 
+int32 comm_log_get_last_io_error(void)
+{
+    return LoggerFacade::Instance().LastIoError();
+}
+
 void comm_log_write(LogLevel level,
                     const char* file,
                     const char* func,
