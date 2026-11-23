@@ -38,7 +38,8 @@ static void TestAbort()
 static std::string MakeDir(const char* name)
 {
     char path[256];
-    snprintf(path, sizeof(path), "/tmp/comm-log-fix-%d-%s", (int)getpid(), name);
+    static unsigned int next_dir = 0;
+    snprintf(path, sizeof(path), "/tmp/comm-log-fix-%d-%u-%s", (int)getpid(), next_dir++, name);
     mkdir(path, 0755);
     return path;
 }
@@ -143,6 +144,45 @@ static void TestTodayOversize()
     cfg.keep_days = 0;
     CHECK(comm_log_init(&cfg) != 0);
     CHECK(Exists(dir + "/" + TodayKey() + ".log"));
+}
+
+static void TestFatalDrainsPriorLogs()
+{
+    std::string dir = MakeDir("fatal-drain");
+    CommLogConfig cfg;
+    FillBase(&cfg, dir);
+    cfg.console_level = LOG_LEVEL_NONE;
+    cfg.flush_interval_ms = 60000;
+    CHECK(comm_log_init(&cfg) == 0);
+    for (int i = 0; i < 100; ++i)
+    {
+        LOG_INFO("fatal-before-%d", i);
+    }
+    g_abort_hits = 0;
+    comm_log::SetFatalAbortHook(TestAbort);
+    comm_log_fatal("test", "fn", 1, "%s", "fatal-last");
+    comm_log::SetFatalAbortHook(NULL);
+    CHECK(g_abort_hits == 1);
+    comm_log_fini();
+
+    FILE* fp = fopen((dir + "/" + TodayKey() + ".log").c_str(), "r");
+    CHECK(fp != NULL);
+    if (fp)
+    {
+        std::string data;
+        char buffer[4096];
+        size_t size = 0;
+        while ((size = fread(buffer, 1, sizeof(buffer), fp)) > 0)
+        {
+            data.append(buffer, size);
+        }
+        size_t previous = data.find("fatal-before-99");
+        size_t fatal = data.find("fatal-last");
+        CHECK(previous != std::string::npos);
+        CHECK(fatal != std::string::npos);
+        CHECK(previous < fatal);
+        fclose(fp);
+    }
 }
 
 static void TestFlushBarrier()
@@ -432,6 +472,7 @@ int main()
     TestNullFormat();
     TestLongMessages();
     TestFlushBarrier();
+    TestFatalDrainsPriorLogs();
     TestRetryFileOpen();
     TestInitPaths();
     TestConcurrentShutdown();

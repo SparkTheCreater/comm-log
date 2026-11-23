@@ -175,7 +175,7 @@ int32 LoggerFacade::Init(const CommLogConfig& config)
 void LoggerFacade::Fini()
 {
     std::lock_guard<std::mutex> guard(m_state_mutex);
-    if (!m_running.load())
+    if (!m_running.load() && m_thread == COMM_INVALID_THREAD)
     {
         return;
     }
@@ -300,15 +300,11 @@ void LoggerFacade::FatalAndAbort(const char* file,
         WriteConsole(record);
     }
 
-    if (m_running.load() && !m_log_dir.empty())
+    if (m_running.exchange(false))
     {
-        std::lock_guard<std::mutex> guard(m_sink_mutex);
-        if (EnsureOpenForDate(record.date_key))
-        {
-            std::string line_text = m_formatter.Format(record);
-            m_sink.WriteLine(line_text);
-            m_sink.FlushSync();
-        }
+        m_dispatcher.Push(record, record.sequence);
+        m_dispatcher.Stop();
+        Flush();
     }
     g_fatal_abort();
 }
