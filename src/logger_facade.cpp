@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdint.h>
 #include <vector>
 
 namespace comm_log
@@ -72,6 +73,7 @@ LoggerFacade::LoggerFacade()
     , m_file_level(LOG_LEVEL_INFO)
     , m_thread(COMM_INVALID_THREAD)
     , m_last_flush_ms(0)
+    , m_next_cleanup_ms(0)
     , m_last_io_error(0)
     , m_last_error_report_ms(0)
 {
@@ -134,6 +136,20 @@ int32 LoggerFacade::Init(const CommLogConfig& config)
     std::string date_key = TimeUtil::DateKey(t);
     m_retention.SetCurrentDateKey(date_key);
     m_last_flush_ms = now;
+    m_next_cleanup_ms = config.cleanup_interval_ms > 0
+                            ? now + config.cleanup_interval_ms
+                            : 0;
+
+    if (!TryCleanup(date_key))
+    {
+        m_config = saved_config;
+        m_log_dir = saved_dir;
+        m_level.store(saved_level);
+        m_console_level.store(saved_console);
+        m_file_level.store(saved_file);
+        m_retention.Configure(saved_max_bytes, saved_keep_days);
+        return RET_ERROR;
+    }
 
     m_dispatcher.Start(config.queue_capacity);
     m_running.store(true);
@@ -144,26 +160,6 @@ int32 LoggerFacade::Init(const CommLogConfig& config)
         m_running.store(false);
         m_dispatcher.Stop();
         m_dispatcher.NotifyAll();
-        m_config = saved_config;
-        m_log_dir = saved_dir;
-        m_level.store(saved_level);
-        m_console_level.store(saved_console);
-        m_file_level.store(saved_file);
-        m_retention.Configure(saved_max_bytes, saved_keep_days);
-        return RET_ERROR;
-    }
-
-    if (!TryCleanup(date_key))
-    {
-        m_running.store(false);
-        m_dispatcher.Stop();
-        m_dispatcher.NotifyAll();
-        if (m_thread != COMM_INVALID_THREAD)
-        {
-            Thread::Wait(m_thread);
-            m_thread = COMM_INVALID_THREAD;
-        }
-        m_sink.Close();
         m_config = saved_config;
         m_log_dir = saved_dir;
         m_level.store(saved_level);
@@ -342,12 +338,26 @@ void LoggerFacade::Run()
 {
     for (;;)
     {
+        uint32 timeout_ms = 0;
+        if (m_next_cleanup_ms != 0)
+        {
+            uint64 now = TimeUtil::NowMs();
+            uint64 wait_ms = m_next_cleanup_ms > now ? m_next_cleanup_ms - now : 1;
+            timeout_ms = wait_ms > UINT32_MAX ? UINT32_MAX : (uint32)wait_ms;
+        }
         LogRecord record;
-        if (!m_dispatcher.Pop(record))
+        if (!m_dispatcher.Pop(record, timeout_ms))
         {
             if (!m_running.load())
             {
                 break;
+            }
+            uint64 now = TimeUtil::NowMs();
+            if (m_next_cleanup_ms != 0 && now >= m_next_cleanup_ms)
+            {
+                std::lock_guard<std::mutex> guard(m_sink_mutex);
+                TryCleanup(TimeUtil::DateKey(TimeUtil::ToLocalTime(now)));
+                m_next_cleanup_ms = now + m_config.cleanup_interval_ms;
             }
             continue;
         }

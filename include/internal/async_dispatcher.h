@@ -21,7 +21,7 @@ public:
     void Stop();
 
     bool Push(const LogRecord& record, uint64& sequence);
-    bool Pop(LogRecord& record);
+    bool Pop(LogRecord& record, uint32 timeout_ms = 0);
     uint64 LastSequence() const;
     void Complete(uint64 sequence);
     void Wait(uint64 sequence);

@@ -42,6 +42,7 @@ typedef struct CommLogConfig
     uint32 keep_days;
     uint32 queue_capacity;
     uint32 flush_interval_ms;
+    uint32 cleanup_interval_ms;
     LogLevel console_level;
     LogLevel file_level;
     LogLevel level;

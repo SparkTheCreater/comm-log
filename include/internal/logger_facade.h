@@ -77,6 +77,7 @@ private:
     std::mutex m_sink_mutex;
     std::mutex m_console_mutex;
     uint64 m_last_flush_ms;
+    uint64 m_next_cleanup_ms;
     std::atomic<int32> m_last_io_error;
     std::atomic<uint64> m_last_error_report_ms;
 };

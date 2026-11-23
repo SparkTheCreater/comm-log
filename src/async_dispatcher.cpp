@@ -1,5 +1,7 @@
 #include "internal/async_dispatcher.h"
 
+#include <chrono>
+
 namespace comm_log
 {
 
@@ -58,12 +60,19 @@ bool AsyncDispatcher::Push(const LogRecord& record, uint64& sequence)
     return true;
 }
 
-bool AsyncDispatcher::Pop(LogRecord& record)
+bool AsyncDispatcher::Pop(LogRecord& record, uint32 timeout_ms)
 {
     std::unique_lock<std::mutex> lock(m_mutex);
-    while (m_running && m_queue.empty())
+    if (timeout_ms == 0)
     {
-        m_cv_not_empty.wait(lock);
+        while (m_running && m_queue.empty())
+        {
+            m_cv_not_empty.wait(lock);
+        }
+    }
+    else if (m_running && m_queue.empty())
+    {
+        m_cv_not_empty.wait_for(lock, std::chrono::milliseconds(timeout_ms));
     }
     if (m_queue.empty())
     {

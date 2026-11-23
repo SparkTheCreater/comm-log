@@ -3,6 +3,7 @@
 #include "internal/file_catalog.h"
 #include "internal/file_sink.h"
 #include "internal/retention_policy.h"
+#include "internal/time_util.h"
 
 #include <pthread.h>
 #include <stdio.h>
@@ -144,6 +145,27 @@ static void TestTodayOversize()
     cfg.keep_days = 0;
     CHECK(comm_log_init(&cfg) != 0);
     CHECK(Exists(dir + "/" + TodayKey() + ".log"));
+}
+
+static void TestPeriodicCleanup()
+{
+    std::string dir = MakeDir("periodic-cleanup");
+    WriteFile(dir + "/unrelated.txt", 1);
+    CommLogConfig cfg;
+    FillBase(&cfg, dir);
+    cfg.console_level = LOG_LEVEL_NONE;
+    cfg.keep_days = 3;
+    cfg.cleanup_interval_ms = 50;
+    CHECK(comm_log_init(&cfg) == 0);
+    WriteFile(dir + "/2020-01-02.log", 1);
+    uint64 deadline = comm_log::TimeUtil::NowMs() + 2000;
+    while (Exists(dir + "/2020-01-02.log") && comm_log::TimeUtil::NowMs() < deadline)
+    {
+        usleep(10 * 1000);
+    }
+    CHECK(!Exists(dir + "/2020-01-02.log"));
+    CHECK(Exists(dir + "/unrelated.txt"));
+    comm_log_fini();
 }
 
 static void TestIoErrors()
@@ -498,6 +520,7 @@ int main()
     TestFlushBarrier();
     TestFatalDrainsPriorLogs();
     TestIoErrors();
+    TestPeriodicCleanup();
     TestRetryFileOpen();
     TestInitPaths();
     TestConcurrentShutdown();
