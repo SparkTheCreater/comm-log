@@ -212,7 +212,7 @@ void LoggerFacade::Write(LogLevel level,
     {
         return;
     }
-    if (level == LOG_LEVEL_NONE)
+    if (!IsValidLevel(level) || level == LOG_LEVEL_NONE || level < m_level.load())
     {
         return;
     }

@@ -145,6 +145,33 @@ static void TestTodayOversize()
     CHECK(Exists(dir + "/" + TodayKey() + ".log"));
 }
 
+static void TestGlobalLevelFilter()
+{
+    std::string dir = MakeDir("global-level");
+    CommLogConfig cfg;
+    FillBase(&cfg, dir);
+    cfg.level = LOG_LEVEL_ERROR;
+    cfg.console_level = LOG_LEVEL_TRACE;
+    cfg.file_level = LOG_LEVEL_TRACE;
+    CHECK(comm_log_init(&cfg) == 0);
+
+    LOG_INFO("%s", "filtered-info");
+    LOG_ERROR("%s", "visible-error");
+    comm_log_fini();
+
+    FILE* fp = fopen((dir + "/" + TodayKey() + ".log").c_str(), "r");
+    CHECK(fp != NULL);
+    if (fp)
+    {
+        char data[1024] = {0};
+        size_t size = fread(data, 1, sizeof(data) - 1, fp);
+        data[size] = '\0';
+        CHECK(strstr(data, "filtered-info") == NULL);
+        CHECK(strstr(data, "visible-error") != NULL);
+        fclose(fp);
+    }
+}
+
 static void TestRetryFileOpen()
 {
     std::string dir = MakeDir("open-retry");
@@ -272,6 +299,7 @@ int main()
     TestFatalBeforeInit();
     TestTodayOversize();
     TestPreserveDirectoryPermissions();
+    TestGlobalLevelFilter();
     TestRetryFileOpen();
     TestInitPaths();
     TestStopKeepsWaitingRecord();
