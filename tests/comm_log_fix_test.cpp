@@ -145,6 +145,28 @@ static void TestTodayOversize()
     CHECK(Exists(dir + "/" + TodayKey() + ".log"));
 }
 
+static void TestNullFormat()
+{
+    std::string dir = MakeDir("null-format");
+    CommLogConfig cfg;
+    FillBase(&cfg, dir);
+    CHECK(comm_log_init(&cfg) == 0);
+    comm_log_write(LOG_LEVEL_INFO, "test", "fn", 1, NULL);
+    LOG_INFO("%s", "valid-message");
+    comm_log_fini();
+
+    FILE* fp = fopen((dir + "/" + TodayKey() + ".log").c_str(), "r");
+    CHECK(fp != NULL);
+    if (fp)
+    {
+        char data[1024] = {0};
+        size_t size = fread(data, 1, sizeof(data) - 1, fp);
+        data[size] = '\0';
+        CHECK(strstr(data, "valid-message") != NULL);
+        fclose(fp);
+    }
+}
+
 static void TestGlobalLevelFilter()
 {
     std::string dir = MakeDir("global-level");
@@ -300,6 +322,7 @@ int main()
     TestTodayOversize();
     TestPreserveDirectoryPermissions();
     TestGlobalLevelFilter();
+    TestNullFormat();
     TestRetryFileOpen();
     TestInitPaths();
     TestStopKeepsWaitingRecord();
