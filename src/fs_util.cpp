@@ -10,13 +10,19 @@
 namespace comm_log
 {
 
+static bool IsDirectory(const std::string& path)
+{
+    struct stat st;
+    return stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+}
+
 static bool MkdirOne(const std::string& dir, int mode)
 {
     if (dir.empty())
     {
         return false;
     }
-    if (access(dir.c_str(), F_OK) == 0)
+    if (IsDirectory(dir))
     {
         return true;
     }
@@ -24,11 +30,7 @@ static bool MkdirOne(const std::string& dir, int mode)
     {
         return true;
     }
-    if (errno == EEXIST)
-    {
-        return true;
-    }
-    return false;
+    return errno == EEXIST && IsDirectory(dir);
 }
 
 bool FsUtil::EnsureDir(const std::string& dir, int mode)
@@ -56,7 +58,6 @@ bool FsUtil::EnsureDir(const std::string& dir, int mode)
     {
         return false;
     }
-    chmod(path.c_str(), (mode_t)mode);
     return true;
 }
 

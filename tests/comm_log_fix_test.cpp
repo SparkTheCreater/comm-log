@@ -144,6 +144,21 @@ static void TestTodayOversize()
     CHECK(Exists(dir + "/" + TodayKey() + ".log"));
 }
 
+static void TestPreserveDirectoryPermissions()
+{
+    std::string dir = MakeDir("permissions");
+    CHECK(chmod(dir.c_str(), 0750) == 0);
+
+    CommLogConfig cfg;
+    FillBase(&cfg, dir);
+    CHECK(comm_log_init(&cfg) == 0);
+    comm_log_fini();
+
+    struct stat st;
+    CHECK(stat(dir.c_str(), &st) == 0);
+    CHECK((st.st_mode & 0777) == 0750);
+}
+
 static void TestInitPaths()
 {
     std::string bad_parent = MakeDir("notdir");
@@ -176,7 +191,7 @@ static void TestInitPaths()
     FillBase(&again, other);
     CHECK(comm_log_init(&again) != 0);
 
-    LOG_INFO("still-first-dir");
+    LOG_INFO("%s", "still-first-dir");
     comm_log_flush();
     usleep(50 * 1000);
     CHECK(Exists(dir + "/" + TodayKey() + ".log"));
@@ -243,6 +258,7 @@ int main()
     TestSkipUndeletable();
     TestFatalBeforeInit();
     TestTodayOversize();
+    TestPreserveDirectoryPermissions();
     TestInitPaths();
     TestStopKeepsWaitingRecord();
     if (g_failed)
