@@ -9,6 +9,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <vector>
+#include <vector>
 
 namespace comm_log
 {
@@ -23,6 +25,31 @@ void SetFatalAbortHook(void (*fn)())
 static bool IsValidLevel(LogLevel level)
 {
     return level >= LOG_LEVEL_TRACE && level <= LOG_LEVEL_NONE;
+}
+
+static bool FormatMessage(const char* format, va_list args, std::string& message)
+{
+    if (!format)
+    {
+        message.clear();
+        return true;
+    }
+    va_list measure_args;
+    va_copy(measure_args, args);
+    int length = vsnprintf(NULL, 0, format, measure_args);
+    va_end(measure_args);
+    if (length < 0)
+    {
+        return false;
+    }
+    std::vector<char> buffer((size_t)length + 1);
+    int written = vsnprintf(buffer.data(), buffer.size(), format, args);
+    if (written != length)
+    {
+        return false;
+    }
+    message.assign(buffer.data(), (size_t)length);
+    return true;
 }
 
 void* CALLBACK LoggerThread(void* arg)
@@ -217,8 +244,11 @@ void LoggerFacade::Write(LogLevel level,
         return;
     }
 
-    char buffer[1024];
-    vsnprintf(buffer, sizeof(buffer), format, args);
+    std::string message;
+    if (!FormatMessage(format, args, message))
+    {
+        return;
+    }
 
     LogRecord record;
     record.level = level;
@@ -226,7 +256,7 @@ void LoggerFacade::Write(LogLevel level,
     record.line = line;
     record.file = file ? file : "";
     record.func = func ? func : "";
-    record.message = buffer;
+    record.message = message;
     record.date_key = TimeUtil::DateKey(TimeUtil::ToLocalTime(record.timestamp_ms));
 
     LogLevel console_level = m_console_level.load();
@@ -252,11 +282,10 @@ void LoggerFacade::FatalAndAbort(const char* file,
                                  const char* format,
                                  va_list args)
 {
-    char buffer[1024];
-    buffer[0] = '\0';
-    if (format)
+    std::string message;
+    if (!FormatMessage(format, args, message))
     {
-        vsnprintf(buffer, sizeof(buffer), format, args);
+        message = "failed to format fatal log";
     }
 
     LogRecord record;
@@ -265,7 +294,7 @@ void LoggerFacade::FatalAndAbort(const char* file,
     record.line = line;
     record.file = file ? file : "";
     record.func = func ? func : "";
-    record.message = buffer;
+    record.message = message;
     record.date_key = TimeUtil::DateKey(TimeUtil::ToLocalTime(record.timestamp_ms));
 
     if (LOG_LEVEL_FATAL >= m_console_level.load())

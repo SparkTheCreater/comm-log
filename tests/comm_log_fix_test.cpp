@@ -145,6 +145,41 @@ static void TestTodayOversize()
     CHECK(Exists(dir + "/" + TodayKey() + ".log"));
 }
 
+static void TestLongMessages()
+{
+    std::string dir = MakeDir("long-message");
+    CommLogConfig cfg;
+    FillBase(&cfg, dir);
+    CHECK(comm_log_init(&cfg) == 0);
+    std::string message(8192, 'x');
+    message += "-中文结尾";
+    LOG_INFO("%s", message.c_str());
+
+    std::string fatal_message(4096, 'f');
+    g_abort_hits = 0;
+    comm_log::SetFatalAbortHook(TestAbort);
+    comm_log_fatal("test", "fn", 1, "%s", fatal_message.c_str());
+    comm_log::SetFatalAbortHook(NULL);
+    CHECK(g_abort_hits == 1);
+    comm_log_fini();
+
+    FILE* fp = fopen((dir + "/" + TodayKey() + ".log").c_str(), "r");
+    CHECK(fp != NULL);
+    if (fp)
+    {
+        std::string data;
+        char buffer[4096];
+        size_t size = 0;
+        while ((size = fread(buffer, 1, sizeof(buffer), fp)) > 0)
+        {
+            data.append(buffer, size);
+        }
+        CHECK(data.find(message) != std::string::npos);
+        CHECK(data.find(fatal_message) != std::string::npos);
+        fclose(fp);
+    }
+}
+
 static void TestNullFormat()
 {
     std::string dir = MakeDir("null-format");
@@ -175,6 +210,7 @@ static void TestGlobalLevelFilter()
     cfg.level = LOG_LEVEL_ERROR;
     cfg.console_level = LOG_LEVEL_TRACE;
     cfg.file_level = LOG_LEVEL_TRACE;
+    cfg.console_level = LOG_LEVEL_NONE;
     CHECK(comm_log_init(&cfg) == 0);
 
     LOG_INFO("%s", "filtered-info");
@@ -323,6 +359,7 @@ int main()
     TestPreserveDirectoryPermissions();
     TestGlobalLevelFilter();
     TestNullFormat();
+    TestLongMessages();
     TestRetryFileOpen();
     TestInitPaths();
     TestStopKeepsWaitingRecord();
