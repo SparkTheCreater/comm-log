@@ -1,6 +1,7 @@
 #include "comm_log.h"
 #include "internal/async_dispatcher.h"
 #include "internal/file_catalog.h"
+#include "internal/file_sink.h"
 #include "internal/retention_policy.h"
 
 #include <pthread.h>
@@ -144,6 +145,18 @@ static void TestTodayOversize()
     CHECK(Exists(dir + "/" + TodayKey() + ".log"));
 }
 
+static void TestRetryFileOpen()
+{
+    std::string dir = MakeDir("open-retry");
+    comm_log::FileSink sink;
+    CHECK(!sink.Open(dir, "missing/child"));
+    CHECK(!sink.IsOpen());
+    CHECK(sink.CurrentPath().empty());
+    CHECK(sink.Open(dir, TodayKey()));
+    CHECK(sink.WriteLine("retry-succeeds"));
+    sink.Close();
+}
+
 static void TestPreserveDirectoryPermissions()
 {
     std::string dir = MakeDir("permissions");
@@ -259,6 +272,7 @@ int main()
     TestFatalBeforeInit();
     TestTodayOversize();
     TestPreserveDirectoryPermissions();
+    TestRetryFileOpen();
     TestInitPaths();
     TestStopKeepsWaitingRecord();
     if (g_failed)

@@ -20,12 +20,17 @@ bool FileSink::Open(const std::string& dir, const std::string& date_key)
 {
     Close();
 
+    std::string path = dir + "/" + date_key + ".log";
+    FILE* fp = fopen(path.c_str(), "a");
+    if (!fp)
+    {
+        return false;
+    }
     m_dir = dir;
     m_date_key = date_key;
-    m_path = m_dir + "/" + m_date_key + ".log";
-
-    m_fp = fopen(m_path.c_str(), "a");
-    return (m_fp != NULL);
+    m_path = path;
+    m_fp = fp;
+    return true;
 }
 
 void FileSink::Close()
@@ -35,8 +40,7 @@ void FileSink::Close()
         fclose(m_fp);
         m_fp = NULL;
     }
-    // fini 后必须清掉打开状态：EnsureOpenForDate 以 date_key+path 非空判定文件仍打开。
-    // 若不清理，二次 init 会跳过 fopen，WriteLine 对着空指针丢日志。
+    // 路径仅描述已成功打开的文件，不能作为文件描述符仍有效的依据。
     m_dir.clear();
     m_date_key.clear();
     m_path.clear();
@@ -73,6 +77,11 @@ void FileSink::FlushSync()
     {
         fsync(fd);
     }
+}
+
+bool FileSink::IsOpen() const
+{
+    return m_fp != NULL;
 }
 
 const std::string& FileSink::CurrentDateKey() const

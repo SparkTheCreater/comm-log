@@ -20,6 +20,7 @@ public:
     bool WriteLine(const std::string& line);
     void Flush();
     void FlushSync();
+    bool IsOpen() const;
 
     const std::string& CurrentDateKey() const;
     const std::string& CurrentPath() const;

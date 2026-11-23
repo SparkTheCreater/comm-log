@@ -341,7 +341,7 @@ void LoggerFacade::Run()
 
 bool LoggerFacade::EnsureOpenForDate(const std::string& date_key)
 {
-    if (m_sink.CurrentDateKey() == date_key && !m_sink.CurrentPath().empty())
+    if (m_sink.IsOpen() && m_sink.CurrentDateKey() == date_key)
     {
         return true;
     }
