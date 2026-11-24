@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 namespace comm_log
@@ -110,6 +111,43 @@ static void TestKeepDays()
     CHECK(!Exists(dir + "/2026-01-01.log"));
     CHECK(Exists(dir + "/2026-01-02.log"));
     CHECK(Exists(dir + "/2026-01-31.log"));
+}
+
+static void TestKeepDaysAcrossDst()
+{
+    const char* old_timezone = getenv("TZ");
+    std::string saved_timezone = old_timezone ? old_timezone : "";
+    setenv("TZ", "America/New_York", 1);
+    tzset();
+    struct
+    {
+        const char* previous;
+        const char* current;
+    } cases[] = {
+        {"2026-03-07", "2026-03-08"},
+        {"2026-10-31", "2026-11-01"}
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)
+    {
+        std::string dir = MakeDir("dst-days");
+        WriteFile(dir + "/" + cases[i].previous + ".log", 1);
+        WriteFile(dir + "/" + cases[i].current + ".log", 1);
+        comm_log::RetentionPolicy policy;
+        policy.Configure(0, 1);
+        policy.SetCurrentDateKey(cases[i].current);
+        CHECK(policy.Cleanup(dir));
+        CHECK(!Exists(dir + "/" + cases[i].previous + ".log"));
+        CHECK(Exists(dir + "/" + cases[i].current + ".log"));
+    }
+    if (old_timezone)
+    {
+        setenv("TZ", saved_timezone.c_str(), 1);
+    }
+    else
+    {
+        unsetenv("TZ");
+    }
+    tzset();
 }
 
 static void TestSkipUndeletable()
@@ -566,6 +604,7 @@ int main()
 {
     TestParseDate();
     TestKeepDays();
+    TestKeepDaysAcrossDst();
     TestSkipUndeletable();
     TestFatalBeforeInit();
     TestTodayOversize();
