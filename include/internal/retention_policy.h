@@ -16,12 +16,12 @@ public:
 
     void Configure(uint64 max_total_bytes, uint32 keep_days);
     void SetCurrentDateKey(const std::string& date_key);
-    bool Cleanup(const std::string& dir);
+    bool Cleanup(const std::string& dir, const std::string& active_path = std::string());
 
 private:
-    bool CleanupBySize(FileCatalog& catalog);
+    bool CleanupBySize(FileCatalog& catalog, const std::string& active_path);
     bool CleanupByDays(FileCatalog& catalog);
-    bool RemoveOldest(FileCatalog& catalog);
+    bool RemoveOldest(FileCatalog& catalog, const std::string& active_path);
 
 private:
     uint64 m_max_total_bytes;

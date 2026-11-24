@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <stdio.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace comm_log
@@ -17,7 +18,8 @@ static bool RequireErrno(bool success)
 }
 
 FileSink::FileSink()
-    : m_fp(NULL)
+    : m_size(0)
+    , m_fp(NULL)
 {
 }
 
@@ -48,7 +50,14 @@ bool FileSink::OpenPath(const std::string& path, const std::string& date_key)
         fclose(fp);
         return false;
     }
+    struct stat st;
+    if (fstat(fileno(fp), &st) != 0)
+    {
+        fclose(fp);
+        return false;
+    }
     m_path = path;
+    m_size = (uint64)st.st_size;
     m_date_key = date_key;
     m_fp = fp;
     return true;
@@ -65,6 +74,7 @@ bool FileSink::Close()
     m_dir.clear();
     m_date_key.clear();
     m_path.clear();
+    m_size = 0;
     return RequireErrno(result == 0);
 }
 
@@ -78,6 +88,7 @@ bool FileSink::WriteLine(const std::string& line)
     size_t m = fwrite("\n", 1, 1, m_fp);
     if (n == line.size() && m == 1)
     {
+        m_size += n + m;
         return true;
     }
     if (errno == 0)
@@ -109,6 +120,11 @@ bool FileSink::FlushSync()
 bool FileSink::IsOpen() const
 {
     return m_fp != NULL;
+}
+
+uint64 FileSink::CurrentSize() const
+{
+    return m_size;
 }
 
 const std::string& FileSink::CurrentDateKey() const

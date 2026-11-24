@@ -26,6 +26,7 @@ public:
     bool Drop(const std::string& path);
 
     static bool ParseDateKey(const std::string& name, std::string& date_key);
+    static bool PartNumber(const std::string& name, uint32& part);
 
 private:
     std::vector<LogFileInfo> m_files;

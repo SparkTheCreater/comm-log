@@ -26,18 +26,18 @@ void RetentionPolicy::SetCurrentDateKey(const std::string& date_key)
     m_current_date_key = date_key;
 }
 
-bool RetentionPolicy::Cleanup(const std::string& dir)
+bool RetentionPolicy::Cleanup(const std::string& dir, const std::string& active_path)
 {
     FileCatalog catalog;
     if (!catalog.Scan(dir))
     {
         return false;
     }
-    if (!CleanupBySize(catalog))
+    if (!CleanupByDays(catalog))
     {
         return false;
     }
-    return CleanupByDays(catalog);
+    return CleanupBySize(catalog, active_path);
 }
 
 static bool IsSkipped(const std::vector<std::string>& skipped, const std::string& path)
@@ -114,11 +114,17 @@ static bool DaysDiff(const std::string& oldest, const std::string& current, int3
     return true;
 }
 
-bool RetentionPolicy::CleanupBySize(FileCatalog& catalog)
+bool RetentionPolicy::CleanupBySize(FileCatalog& catalog, const std::string& active_path)
 {
     if (m_max_total_bytes == 0)
     {
         return true;
+    }
+    std::string protected_path = active_path;
+    if (protected_path.empty() && !catalog.Files().empty() &&
+        catalog.Files().back().date_key == m_current_date_key)
+    {
+        protected_path = catalog.Files().back().path;
     }
 
     std::vector<std::string> skipped;
@@ -129,7 +135,7 @@ bool RetentionPolicy::CleanupBySize(FileCatalog& catalog)
         const std::vector<LogFileInfo>& files = catalog.Files();
         for (size_t i = 0; i < files.size(); ++i)
         {
-            if (files[i].date_key == m_current_date_key)
+            if (files[i].path == protected_path)
             {
                 continue;
             }
@@ -205,14 +211,14 @@ bool RetentionPolicy::CleanupByDays(FileCatalog& catalog)
     }
 }
 
-bool RetentionPolicy::RemoveOldest(FileCatalog& catalog)
+bool RetentionPolicy::RemoveOldest(FileCatalog& catalog, const std::string& active_path)
 {
     LogFileInfo oldest;
     if (!catalog.Oldest(oldest))
     {
         return false;
     }
-    if (oldest.date_key == m_current_date_key)
+    if (oldest.path == active_path)
     {
         return false;
     }

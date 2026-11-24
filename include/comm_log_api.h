@@ -32,6 +32,7 @@ LogLevel;
 函数功能 : 日志初始化配置
 输入参数说明 : log_dir 日志目录; max_total_bytes 总容量; keep_days 保留天数;
                queue_capacity 队列容量; flush_interval_ms 持续有日志时的落盘间隔，队列写空时立即落盘;
+               cleanup_interval_ms 定期清理间隔，0 表示关闭;
                console_level 控制台等级; file_level 文件等级; level 全局等级
 函数返回值的说明 : 无
 */

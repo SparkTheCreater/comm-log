@@ -23,6 +23,7 @@ public:
     bool Flush();
     bool FlushSync();
     bool IsOpen() const;
+    uint64 CurrentSize() const;
 
     const std::string& CurrentDateKey() const;
     const std::string& CurrentPath() const;
@@ -31,6 +32,7 @@ private:
     std::string m_dir;
     std::string m_date_key;
     std::string m_path;
+    uint64 m_size;
     FILE* m_fp;
 };
 

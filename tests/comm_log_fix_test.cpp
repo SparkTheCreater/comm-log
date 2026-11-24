@@ -147,6 +147,62 @@ static void TestTodayOversize()
     CHECK(Exists(dir + "/" + TodayKey() + ".log"));
 }
 
+static void TestTodayParts()
+{
+    std::string dir = MakeDir("today-parts");
+    WriteFile(dir + "/2020-01-02.log", 10);
+    WriteFile(dir + "/2020-01-02.001.log", 20);
+    comm_log::RetentionPolicy policy;
+    policy.Configure(25, 0);
+    policy.SetCurrentDateKey("2020-01-02");
+    CHECK(policy.Cleanup(dir, dir + "/2020-01-02.001.log"));
+    CHECK(!Exists(dir + "/2020-01-02.log"));
+    CHECK(Exists(dir + "/2020-01-02.001.log"));
+}
+
+static void TestRotateAndRestart()
+{
+    std::string dir = MakeDir("rotate-restart");
+    CommLogConfig cfg;
+    FillBase(&cfg, dir);
+    cfg.console_level = LOG_LEVEL_NONE;
+    cfg.max_total_bytes = 200;
+    CHECK(comm_log_init(&cfg) == 0);
+    comm_log_write(LOG_LEVEL_INFO, "test", "test", 1, "%080d", 1);
+    comm_log_flush();
+    comm_log_fini();
+    std::string base = dir + "/" + TodayKey() + ".log";
+    CHECK(Exists(base));
+    CHECK(comm_log_init(&cfg) == 0);
+    comm_log_write(LOG_LEVEL_INFO, "test", "test", 2, "%080d", 2);
+    comm_log_flush();
+    comm_log_fini();
+    CHECK(Exists(base));
+    CHECK(Exists(dir + "/" + TodayKey() + ".001.log"));
+    CHECK(comm_log_init(&cfg) == 0);
+    comm_log_write(LOG_LEVEL_INFO, "test", "test", 3, "%080d", 3);
+    comm_log_write(LOG_LEVEL_INFO, "test", "test", 4, "%080d", 4);
+    comm_log_flush();
+    comm_log_fini();
+    CHECK(!Exists(dir + "/" + TodayKey() + ".001.log"));
+    comm_log::FileCatalog catalog;
+    CHECK(catalog.Scan(dir));
+    CHECK(!catalog.Files().empty());
+    CHECK(catalog.Files().back().date_key == TodayKey());
+    std::string latest = catalog.Files().back().path;
+    FILE* fp = fopen(latest.c_str(), "rb");
+    CHECK(fp != NULL);
+    if (fp == NULL)
+    {
+        return;
+    }
+    char buffer[4096];
+    size_t size = fread(buffer, 1, sizeof(buffer) - 1, fp);
+    fclose(fp);
+    buffer[size] = 0;
+    CHECK(strstr(buffer, "0004") != NULL);
+}
+
 static void TestPeriodicCleanup()
 {
     std::string dir = MakeDir("periodic-cleanup");
@@ -520,6 +576,8 @@ int main()
     TestFlushBarrier();
     TestFatalDrainsPriorLogs();
     TestIoErrors();
+    TestTodayParts();
+    TestRotateAndRestart();
     TestPeriodicCleanup();
     TestRetryFileOpen();
     TestInitPaths();

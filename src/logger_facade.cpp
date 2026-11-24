@@ -74,6 +74,7 @@ LoggerFacade::LoggerFacade()
     , m_thread(COMM_INVALID_THREAD)
     , m_last_flush_ms(0)
     , m_next_cleanup_ms(0)
+    , m_next_part(0)
     , m_last_io_error(0)
     , m_last_error_report_ms(0)
 {
@@ -130,6 +131,8 @@ int32 LoggerFacade::Init(const CommLogConfig& config)
     }
 
     m_retention.Configure(config.max_total_bytes, config.keep_days);
+    m_next_part = 0;
+    m_active_date_key.clear();
 
     uint64 now = TimeUtil::NowMs();
     TimeInfo t = TimeUtil::ToLocalTime(now);
@@ -356,7 +359,10 @@ void LoggerFacade::Run()
             if (m_next_cleanup_ms != 0 && now >= m_next_cleanup_ms)
             {
                 std::lock_guard<std::mutex> guard(m_sink_mutex);
-                TryCleanup(TimeUtil::DateKey(TimeUtil::ToLocalTime(now)));
+                if (!TryCleanup(TimeUtil::DateKey(TimeUtil::ToLocalTime(now)), m_sink.CurrentPath()))
+                {
+                    ReportIoError(errno);
+                }
                 m_next_cleanup_ms = now + m_config.cleanup_interval_ms;
             }
             continue;
@@ -368,7 +374,7 @@ void LoggerFacade::Run()
             {
                 ReportIoError(errno);
             }
-            else if (!m_sink.WriteLine(m_formatter.Format(record)))
+            else if (!WriteRecord(record))
             {
                 ReportIoError(errno);
             }
@@ -392,22 +398,107 @@ void LoggerFacade::Run()
 
 bool LoggerFacade::EnsureOpenForDate(const std::string& date_key)
 {
+    if (m_active_date_key != date_key)
+    {
+        m_next_part = 0;
+    }
     if (m_sink.IsOpen() && m_sink.CurrentDateKey() == date_key)
     {
         return true;
     }
-    if (!m_sink.Open(m_log_dir, date_key))
+    std::string path = m_log_dir + "/" + date_key;
+    if (m_next_part == 0)
+    {
+        FileCatalog catalog;
+        if (!catalog.Scan(m_log_dir))
+        {
+            return false;
+        }
+        const std::vector<LogFileInfo>& files = catalog.Files();
+        const LogFileInfo* latest = NULL;
+        uint32 highest = 0;
+        for (size_t i = 0; i < files.size(); ++i)
+        {
+            if (files[i].date_key != date_key)
+            {
+                continue;
+            }
+            latest = &files[i];
+            std::string name = files[i].path.substr(m_log_dir.size() + 1);
+            if (name.size() > 14)
+            {
+                uint32 part = 0;
+                if (FileCatalog::PartNumber(name, part))
+                {
+                    highest = part > highest ? part : highest;
+                }
+            }
+        }
+        if (latest)
+        {
+            std::string name = latest->path.substr(m_log_dir.size() + 1);
+            if (name.size() > 14 && !FileCatalog::PartNumber(name, m_next_part))
+            {
+                return false;
+            }
+            uint64 part_size = m_config.max_total_bytes > 0 ? m_config.max_total_bytes / 10 : 0;
+            if (part_size > 0 && latest->size >= part_size)
+            {
+                if (highest == UINT32_MAX)
+                {
+                    errno = EFBIG;
+                    return false;
+                }
+                m_next_part = highest + 1;
+            }
+        }
+    }
+    if (m_next_part == 0)
+    {
+        path += ".log";
+    }
+    else
+    {
+        char suffix[32];
+        snprintf(suffix, sizeof(suffix), ".%03u.log", m_next_part);
+        path += suffix;
+    }
+    if (!m_sink.OpenPath(path, date_key))
     {
         return false;
     }
-    TryCleanup(date_key);
+    m_active_date_key = date_key;
+    return TryCleanup(date_key, m_sink.CurrentPath());
+}
+
+bool LoggerFacade::WriteRecord(const LogRecord& record)
+{
+    std::string line = m_formatter.Format(record);
+    if (!m_sink.WriteLine(line))
+    {
+        return false;
+    }
+    uint64 part_size = m_config.max_total_bytes > 0 ? m_config.max_total_bytes / 10 : 0;
+    if (part_size > 0 && m_sink.CurrentSize() >= part_size)
+    {
+        if (m_next_part == UINT32_MAX)
+        {
+            errno = EFBIG;
+            return false;
+        }
+        ++m_next_part;
+        if (!m_sink.Close())
+        {
+            return false;
+        }
+    }
     return true;
 }
 
-bool LoggerFacade::TryCleanup(const std::string& date_key)
+bool LoggerFacade::TryCleanup(const std::string& date_key, const std::string& active_path)
 {
     m_retention.SetCurrentDateKey(date_key);
-    return m_retention.Cleanup(m_log_dir);
+    return m_retention.Cleanup(m_log_dir, active_path);
 }
 
 void LoggerFacade::EnqueueRecord(LogRecord& record)

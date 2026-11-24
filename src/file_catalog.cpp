@@ -2,37 +2,64 @@
 #include "internal/fs_util.h"
 
 #include <algorithm>
+#include <errno.h>
+#include <stdint.h>
+#include <stdlib.h>
 #include <stdio.h>
 
 namespace comm_log
 {
 
+bool FileCatalog::PartNumber(const std::string& name, uint32& part)
+{
+    if (name.size() == 14)
+    {
+        part = 0;
+        return true;
+    }
+    if (name.size() < 18 || name[10] != '.')
+    {
+        return false;
+    }
+    std::string number = name.substr(11, name.size() - 15);
+    if (number.empty() || (number.size() > 3 && number[0] == '0'))
+    {
+        return false;
+    }
+    for (size_t i = 0; i < number.size(); ++i)
+    {
+        if (number[i] < '0' || number[i] > '9')
+        {
+            return false;
+        }
+    }
+    errno = 0;
+    char* end = NULL;
+    unsigned long value = strtoul(number.c_str(), &end, 10);
+    if (errno != 0 || !end || *end != 0 || value == 0 || value > UINT32_MAX)
+    {
+        return false;
+    }
+    part = (uint32)value;
+    return true;
+}
+
 static bool IsLogFileName(const std::string& name)
 {
-    if (name.size() != 14)
-    {
-        return false;
-    }
-    if (name[4] != '-' || name[7] != '-')
-    {
-        return false;
-    }
-    if (name.substr(10) != ".log")
+    if (name.size() < 14 || name[4] != '-' || name[7] != '-' ||
+        name.substr(name.size() - 4) != ".log")
     {
         return false;
     }
     for (size_t i = 0; i < 10; ++i)
     {
-        if (i == 4 || i == 7)
-        {
-            continue;
-        }
-        if (name[i] < '0' || name[i] > '9')
+        if (i != 4 && i != 7 && (name[i] < '0' || name[i] > '9'))
         {
             return false;
         }
     }
-    return true;
+    uint32 part = 0;
+    return FileCatalog::PartNumber(name, part);
 }
 
 static bool IsLeapYear(int year)
@@ -120,7 +147,15 @@ bool FileCatalog::Scan(const std::string& dir)
     std::sort(m_files.begin(), m_files.end(),
               [](const LogFileInfo& a, const LogFileInfo& b)
               {
-                  return a.date_key < b.date_key;
+                  if (a.date_key != b.date_key)
+                  {
+                      return a.date_key < b.date_key;
+                  }
+                  uint32 a_part = 0;
+                  uint32 b_part = 0;
+                  PartNumber(a.path.substr(a.path.rfind('/') + 1), a_part);
+                  PartNumber(b.path.substr(b.path.rfind('/') + 1), b_part);
+                  return a_part < b_part;
               });
 
     return true;

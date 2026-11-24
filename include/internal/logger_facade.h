@@ -55,7 +55,8 @@ private:
 
     void Run();
     bool EnsureOpenForDate(const std::string& date_key);
-    bool TryCleanup(const std::string& date_key);
+    bool WriteRecord(const LogRecord& record);
+    bool TryCleanup(const std::string& date_key, const std::string& active_path = std::string());
     void EnqueueRecord(LogRecord& record);
     void ReportIoError(int error);
     void WriteConsole(const LogRecord& record);
@@ -78,6 +79,8 @@ private:
     std::mutex m_console_mutex;
     uint64 m_last_flush_ms;
     uint64 m_next_cleanup_ms;
+    uint32 m_next_part;
+    std::string m_active_date_key;
     std::atomic<int32> m_last_io_error;
     std::atomic<uint64> m_last_error_report_ms;
 };
