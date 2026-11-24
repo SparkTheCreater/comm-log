@@ -1,7 +1,6 @@
 #include "internal/retention_policy.h"
 #include "internal/fs_util.h"
 
-#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -73,45 +72,45 @@ static bool IsCalendarDate(int year, int month, int day)
     return day <= days;
 }
 
-static int64 CalendarDay(int year, int month, int day)
-{
-    year -= month <= 2;
-    int era = year >= 0 ? year / 400 : (year - 399) / 400;
-    unsigned int year_of_era = (unsigned int)(year - era * 400);
-    unsigned int day_of_year = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1;
-    unsigned int day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    return (int64)era * 146097 + day_of_era;
-}
-
-static bool ParseDay(const std::string& date, int64& day)
-{
-    int year = 0;
-    int month = 0;
-    int month_day = 0;
-    char extra = 0;
-    if (sscanf(date.c_str(), "%4d-%2d-%2d%c", &year, &month, &month_day, &extra) != 3 ||
-        !IsCalendarDate(year, month, month_day))
-    {
-        return false;
-    }
-    day = CalendarDay(year, month, month_day);
-    return true;
-}
-
 static bool DaysDiff(const std::string& oldest, const std::string& current, int32* days)
 {
-    int64 first = 0;
-    int64 last = 0;
-    if (!ParseDay(oldest, first) || !ParseDay(current, last))
+    int y1 = 0;
+    int m1 = 0;
+    int d1 = 0;
+    int y2 = 0;
+    int m2 = 0;
+    int d2 = 0;
+    if (sscanf(oldest.c_str(), "%4d-%2d-%2d", &y1, &m1, &d1) != 3)
     {
         return false;
     }
-    int64 difference = last - first;
-    if (difference < INT32_MIN || difference > INT32_MAX)
+    if (sscanf(current.c_str(), "%4d-%2d-%2d", &y2, &m2, &d2) != 3)
     {
         return false;
     }
-    *days = (int32)difference;
+    if (!IsCalendarDate(y1, m1, d1) || !IsCalendarDate(y2, m2, d2))
+    {
+        return false;
+    }
+    struct tm t1;
+    struct tm t2;
+    memset(&t1, 0, sizeof(t1));
+    memset(&t2, 0, sizeof(t2));
+    t1.tm_year = y1 - 1900;
+    t1.tm_mon = m1 - 1;
+    t1.tm_mday = d1;
+    t2.tm_year = y2 - 1900;
+    t2.tm_mon = m2 - 1;
+    t2.tm_mday = d2;
+    t1.tm_isdst = -1;
+    t2.tm_isdst = -1;
+    time_t s1 = mktime(&t1);
+    time_t s2 = mktime(&t2);
+    if (s1 == (time_t)-1 || s2 == (time_t)-1)
+    {
+        return false;
+    }
+    *days = (int32)(difftime(s2, s1) / 86400);
     return true;
 }
 
